@@ -1,6 +1,5 @@
 let generatedCode = null;
 let currentTemplate = null;
-let modelLoaded = false;
 
 const $ = id => document.getElementById(id);
 
@@ -15,6 +14,11 @@ function init() {
 
   $('token-input').addEventListener('input', updateDeployBtn);
   $('repo-name').addEventListener('input', updateDeployBtn);
+  $('hf-token').addEventListener('input', () => {
+    const t = $('hf-token').value.trim();
+    localStorage.setItem('hf_token', t);
+    AI.setToken(t || null);
+  });
 
   $('deploy-modal').addEventListener('click', e => {
     if (e.target === $('deploy-modal')) closeDeployModal();
@@ -23,7 +27,7 @@ function init() {
     if (e.key === 'Escape') closeDeployModal();
   });
 
-  // Auto-fill token from URL hash (injected by get-token.ps1)
+  // Auto-fill GitHub token from URL hash
   if (window.location.hash.startsWith('#token=')) {
     const token = window.location.hash.slice(7);
     localStorage.setItem('gh_token', token);
@@ -32,15 +36,17 @@ function init() {
     updateDeployBtn();
   }
 
-  // Auto-fill token from localStorage
+  // Auto-fill tokens from localStorage
   const saved = localStorage.getItem('gh_token');
-  if (saved) {
-    $('token-input').value = saved;
-    updateDeployBtn();
+  if (saved) $('token-input').value = saved;
+
+  const hf = localStorage.getItem('hf_token');
+  if (hf) {
+    $('hf-token').value = hf;
+    AI.setToken(hf);
   }
 
-  // Preload AI model in background
-  setTimeout(preloadAI, 1000);
+  updateDeployBtn();
 
   // Scroll reveal
   const obs = new IntersectionObserver(entries => {
@@ -49,52 +55,6 @@ function init() {
     });
   }, { threshold: 0.08 });
   document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
-}
-
-// ─── PRELOAD AI MODEL ───
-async function preloadAI() {
-  showAIStatus('🧠 Загрузка нейросети (60MB)...', 0, true);
-  try {
-    await AI.load((status) => {
-      if (status.status === 'download') {
-        showAIStatus(status.text, status.progress, true);
-      } else if (status.status === 'ready') {
-        modelLoaded = true;
-        showAIStatus('✅ Нейросеть готова!', 100, false);
-        setTimeout(() => hideAIStatus(), 2000);
-      } else if (status.status === 'error') {
-        showAIStatus('⚠️ Нейросеть не загрузилась: ' + status.text, 0, false);
-        setTimeout(() => hideAIStatus(), 4000);
-      }
-    });
-  } catch (e) {
-    showAIStatus('⚠️ Использую встроенный генератор', 0, false);
-    setTimeout(() => hideAIStatus(), 3000);
-  }
-}
-
-// ─── AI STATUS ───
-function showAIStatus(text, pct, showSpinner) {
-  const el = $('ai-status');
-  const label = $('ai-label');
-  const pctEl = $('ai-pct');
-  const prog = $('ai-progress');
-  const fill = $('ai-progress-fill');
-
-  el.style.display = 'flex';
-  label.textContent = text;
-  if (pct !== undefined) {
-    pctEl.textContent = pct + '%';
-    prog.style.display = 'block';
-    fill.style.width = pct + '%';
-  }
-  if (showSpinner) el.classList.add('ai-loading');
-  else el.classList.remove('ai-loading');
-}
-
-function hideAIStatus() {
-  $('ai-status').style.display = 'none';
-  $('ai-progress').style.display = 'none';
 }
 
 // ─── FILTERS ───
@@ -152,17 +112,17 @@ function autoMatch() {
   }
   const matched = matchTemplate(desc);
   if (currentTemplate) {
-    // Already selected, just show match info
+    // Already selected
   } else {
     currentTemplate = matched;
     selectTemplate(matched.id);
   }
   const wc = desc.split(/\s+/).filter(Boolean).length;
-  $('gen-info').textContent = `${wc} слов · нейросеть сгенерирует контент`;
+  $('gen-info').textContent = `${wc} слов · ИИ сгенерирует уникальный контент`;
   $('generate-btn').disabled = false;
 }
 
-// ─── GENERATE (with real AI) ───
+// ─── GENERATE ───
 async function onGenerate() {
   const desc = $('desc-input').value.trim();
   if (!desc) { shake($('desc-input')); return; }
@@ -171,27 +131,24 @@ async function onGenerate() {
   const accent = $('color-picker').value;
   const siteName = $('site-name').value.trim() || '';
 
-  $('generate-btn').textContent = '⏳ ИИ работает...';
+  $('generate-btn').textContent = '⏳ ИИ генерирует...';
   $('generate-btn').disabled = true;
   $('preview-placeholder').style.display = 'none';
+  showAIStatus('🚀 Запуск ИИ...', 2, true);
 
-  // Try AI, fall back to built-in
+  // Try real AI via Hugging Face Inference API
   let content;
+  let usedRealAI = false;
 
-  if (modelLoaded) {
-    try {
-      showAIStatus('🤖 Нейросеть генерирует контент...', 5, true);
-      content = await AI.generateContent(desc, currentTemplate, (status) => {
-        showAIStatus(status.text, status.progress, status.progress < 100);
-      });
-      showAIStatus('✅ Контент готов!', 100, false);
-      setTimeout(hideAIStatus, 1500);
-    } catch (e) {
-      showAIStatus('⚠️ Ошибка AI, использую запасной генератор', 0, false);
-      setTimeout(hideAIStatus, 2000);
-      content = generateSiteContent(desc, currentTemplate);
-    }
-  } else {
+  try {
+    content = await AI.generateContent(desc, currentTemplate, (status) => {
+      showAIStatus(status.text, status.progress, status.progress < 100);
+    });
+    usedRealAI = true;
+  } catch (e) {
+    console.warn('HF API failed:', e);
+    showAIStatus('⚠️ ИИ временно недоступен, использую встроенный генератор', 0, false);
+    setTimeout(hideAIStatus, 2500);
     content = generateSiteContent(desc, currentTemplate);
   }
 
@@ -206,9 +163,36 @@ async function onGenerate() {
   frame.src = url;
   frame.onload = () => { frame.style.display = 'block'; };
 
+  if (usedRealAI) {
+    showAIStatus('✅ Контент создан нейросетью!', 100, false);
+    setTimeout(hideAIStatus, 2000);
+  }
   $('generate-btn').textContent = '✅ Сайт готов!';
-  $('gen-info').textContent = `${(generatedCode.length / 1024).toFixed(0)} KB · можно деплоить ↓`;
+  $('gen-info').textContent = `${(generatedCode.length / 1024).toFixed(0)} KB · ${usedRealAI ? '🧠 реальный ИИ · ' : ''}можно деплоить ↓`;
   updateDeployBtn();
+}
+
+function showAIStatus(text, pct, showSpinner) {
+  const el = $('ai-status');
+  const label = $('ai-label');
+  const pctEl = $('ai-pct');
+  const prog = $('ai-progress');
+  const fill = $('ai-progress-fill');
+
+  el.style.display = 'flex';
+  label.textContent = text;
+  if (pct !== undefined) {
+    pctEl.textContent = pct + '%';
+    prog.style.display = 'block';
+    fill.style.width = pct + '%';
+  }
+  if (showSpinner) el.classList.add('ai-loading');
+  else el.classList.remove('ai-loading');
+}
+
+function hideAIStatus() {
+  $('ai-status').style.display = 'none';
+  $('ai-progress').style.display = 'none';
 }
 
 function shake(el) {
@@ -237,7 +221,6 @@ async function onDeploy() {
   const token = $('token-input').value.trim();
   const repoName = $('repo-name').value.trim() || 'my-site-' + Date.now().toString(36);
 
-  // Save token to localStorage
   localStorage.setItem('gh_token', token);
 
   if (!token) { shake($('token-input')); return; }

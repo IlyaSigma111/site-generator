@@ -1,131 +1,155 @@
-// ===== Real AI in browser using Transformers.js =====
-// Uses mT5-small (multilingual, 60MB) for Russian text generation
+// ===== Real AI via Hugging Face Inference API =====
+// Uses flan-t5-large (multilingual, 780M) for Russian text generation
+// Free tier: no key needed, but rate-limited. User can optionally provide a HF token.
+
 const AI = {
-  pipe: null,
-  modelName: 'Xenova/mT5-small',
-  loaded: false,
-  loading: false,
-  progress: 0,
+  apiBase: 'https://api-inference.huggingface.co/models/',
+  model: 'google/flan-t5-large',
+  headers: { 'Content-Type': 'application/json' },
+  loaded: true,
 
-  async load(onProgress) {
-    if (this.loaded) return;
-    if (this.loading) return;
-    this.loading = true;
-    this.progress = 0;
-
-    try {
-      const { pipeline } = globalThis;
-
-      onProgress({ status: 'download', text: 'Загрузка нейросети...', progress: 0 });
-
-      this.pipe = await pipeline('text2text-generation', this.modelName, {
-        progress_callback: (p) => {
-          if (p.status === 'progress' && p.total > 0) {
-            const pct = Math.round((p.loaded / p.total) * 100);
-            this.progress = pct;
-            onProgress({ status: 'download', text: `Загрузка модели... ${pct}%`, progress: pct });
-          }
-        },
-      });
-
-      this.loaded = true;
-      onProgress({ status: 'ready', text: '✅ Нейросеть загружена', progress: 100 });
-    } catch (e) {
-      this.loaded = false;
-      this.loading = false;
-      onProgress({ status: 'error', text: '❌ Ошибка загрузки: ' + e.message, progress: 0 });
-      throw e;
+  setToken(token) {
+    if (token) {
+      this.headers['Authorization'] = 'Bearer ' + token;
+    } else {
+      delete this.headers['Authorization'];
     }
   },
 
   async generate(prompt) {
-    if (!this.pipe) throw new Error('Model not loaded');
-    const result = await this.pipe(prompt, {
-      max_new_tokens: 100,
-      temperature: 0.9,
-      do_sample: true,
-      top_p: 0.92,
-      repetition_penalty: 1.1,
+    const resp = await fetch(this.apiBase + this.model, {
+      method: 'POST',
+      headers: this.headers,
+      body: JSON.stringify({
+        inputs: prompt,
+        parameters: {
+          max_new_tokens: 80,
+          temperature: 0.8,
+          top_p: 0.9,
+          do_sample: true,
+          repetition_penalty: 1.15,
+        },
+      }),
     });
-    return (result[0]?.generated_text || '').trim();
+    if (!resp.ok) {
+      const err = await resp.text().catch(() => '');
+      throw new Error(`HTTP ${resp.status}: ${err.slice(0, 200)}`);
+    }
+    const data = await resp.json();
+    const text = (Array.isArray(data) ? data[0]?.generated_text : data?.generated_text) || '';
+    // Remove the input prompt from output (flan-t5 echoes it)
+    return text.replace(prompt, '').trim();
   },
 
-  // Generate website content using real AI
   async generateContent(description, template, onStatus) {
     const setStatus = (s) => { if (onStatus) onStatus(s); };
+    const desc = description.trim();
 
-    setStatus({ text: '🤖 ИИ анализирует запрос...', progress: 10 });
+    setStatus({ text: '🤖 ИИ анализирует запрос...', progress: 5 });
 
-    // 1. Generate site name / headline
-    const namePrompt = `Придумай название для сайта по описанию: ${description}. Напиши только название, 2-3 слова.`;
-    const name = await this.generate(namePrompt);
-    setStatus({ text: `🤖 Название: ${name}`, progress: 25 });
+    // 1. Site name
+    const namePrompt = `Придумай короткое название (2-3 слова) для сайта по описанию: "${desc}". Только название.`;
+    let siteName = '';
+    try {
+      siteName = await this.generate(namePrompt);
+      if (siteName.length < 2 || siteName.length > 60) siteName = '';
+    } catch (e) {
+      siteName = '';
+    }
 
-    // 2. Generate tagline
-    const tagPrompt = `Придумай слоган для сайта "${name}". Описание: ${description}. Одно предложение.`;
-    const tagline = await this.generate(tagPrompt);
-    setStatus({ text: `🤖 Генерация слогана...`, progress: 35 });
+    const sn = siteName || template.name;
+    setStatus({ text: `🤖 Название: ${sn}`, progress: 18 });
 
-    // 3. Generate about text
-    const aboutPrompt = `Напиши текст "О нас" для сайта "${name}". Кратко, 2-3 предложения. Описание: ${description}`;
-    const about = await this.generate(aboutPrompt);
-    setStatus({ text: '🤖 Генерация контента...', progress: 50 });
+    // 2. Tagline
+    const tagPrompt = `Придумай слоган (одно предложение) для сайта "${sn}". Описание: "${desc}".`;
+    let tagline = '';
+    try {
+      tagline = await this.generate(tagPrompt);
+      if (tagline.length < 3) tagline = '';
+    } catch (e) {
+      tagline = '';
+    }
+    setStatus({ text: '🤖 Генерация слогана...', progress: 30 });
 
-    // 4. Generate features
-    const featPrompt = `Перечисли 4 преимущества для сайта "${name}". Каждое начинай с новой строки с "- ". Описание: ${description}`;
-    const featText = await this.generate(featPrompt);
-    const featLines = featText.split('\n').filter(l => l.trim().startsWith('-')).map(l => l.replace(/^-\s*/, '').trim()).filter(Boolean);
-    const features = featLines.slice(0, 4).map((f, i) => ({
-      title: f.split(',')[0] || f.split(' — ')[0] || f,
-      desc: f.split(',')[1] || f.split(' — ')[1] || `Преимущество ${i + 1}`,
-    }));
+    // 3. About text
+    const aboutPrompt = `Напиши текст "О нас" для сайта "${sn}", 2-3 предложения. Описание: "${desc}".`;
+    let aboutText = '';
+    try {
+      aboutText = await this.generate(aboutPrompt);
+      if (aboutText.length < 10) aboutText = '';
+    } catch (e) {
+      aboutText = '';
+    }
+    setStatus({ text: '🤖 Генерация контента...', progress: 45 });
+
+    // 4. Features
+    const featPrompt = `Назови 4 ключевых преимущества для сайта "${sn}". Каждый пункт с новой строки с "-". Описание: "${desc}".`;
+    let features = [];
+    try {
+      const featRaw = await this.generate(featPrompt);
+      const lines = featRaw.split('\n').filter(l => l.trim().startsWith('-'));
+      features = lines.slice(0, 4).map(l => {
+        const t = l.replace(/^-\s*/, '').trim();
+        const parts = t.split(/[,:;—-]/).map(s => s.trim()).filter(Boolean);
+        return { title: parts[0] || 'Преимущество', desc: parts[1] || 'Описание' };
+      });
+    } catch (e) {
+      features = [];
+    }
     if (features.length < 2) {
-      features.push({ title: 'Современный дизайн', desc: 'Актуальные тренды и стильная анимация' });
-      features.push({ title: 'Адаптивность', desc: 'Идеально на любых устройствах' });
+      features = [
+        { title: 'Современный дизайн', desc: 'Актуальные тренды' },
+        { title: 'Адаптивность', desc: 'На всех устройствах' },
+      ];
     }
-    setStatus({ text: '🤖 Генерация преимуществ...', progress: 65 });
+    setStatus({ text: '🤖 Генерация преимуществ...', progress: 60 });
 
-    // 5. Generate services
-    const servPrompt = `Перечисли 3 услуги для сайта "${name}". Кратко, с новой строки. Описание: ${description}`;
-    const servText = await this.generate(servPrompt);
-    const servLines = servText.split('\n').filter(Boolean).slice(0, 3);
-    const services = servLines.map((s, i) => ({
-      title: s.replace(/^\d+[\.\)]\s*/, '').split(',')[0].trim() || `Услуга ${i + 1}`,
-      desc: s.includes(',') ? s.split(',')[1].trim() : `Подробное описание услуги ${i + 1}`,
-    }));
+    // 5. Services
+    const servPrompt = `Назови 3 услуги для сайта "${sn}". Каждая с новой строки. Описание: "${desc}".`;
+    let services = [];
+    try {
+      const servRaw = await this.generate(servPrompt);
+      const lines = servRaw.split('\n').filter(Boolean).slice(0, 3);
+      services = lines.map(l => {
+        const t = l.replace(/^\d+[\.\)]\s*/, '').trim();
+        const parts = t.split(/[,:;—-]/).map(s => s.trim()).filter(Boolean);
+        return { title: parts[0] || 'Услуга', desc: parts[1] || 'Описание' };
+      });
+    } catch (e) {
+      services = [];
+    }
     if (services.length === 0) {
-      services.push({ title: 'Разработка', desc: 'Создание сайтов под ключ' },
-                     { title: 'Дизайн', desc: 'Продуманный интерфейс' },
-                     { title: 'Поддержка', desc: 'Техподдержка и доработки' });
+      services = [
+        { title: 'Разработка', desc: 'Создание сайтов' },
+        { title: 'Дизайн', desc: 'Продуманный интерфейс' },
+        { title: 'Поддержка', desc: 'Техподдержка' },
+      ];
     }
-
-    setStatus({ text: '🤖 Сборка страницы...', progress: 80 });
-
-    const siteName = name || template.name;
+    setStatus({ text: '🤖 Сборка страницы...', progress: 75 });
 
     const content = {
-      siteName,
-      tagline,
-      aboutText: about || `Мы создаём современные цифровые решения. ${description}`,
+      siteName: sn,
+      tagline: tagline || 'Современные цифровые решения',
+      aboutText: aboutText || `Мы создаём сайты по описанию. ${desc}`,
       aboutTitle: 'О нас',
       featuresTitle: 'Наши преимущества',
       servicesTitle: 'Услуги',
       portfolioTitle: 'Наши проекты',
       pricingTitle: 'Тарифы',
       reviewsTitle: 'Отзывы',
-      faqTitle: 'Часто задаваемые вопросы',
-      contactTitle: 'Связаться',
+      faqTitle: 'FAQ',
+      contactTitle: 'Контакты',
       galleryTitle: 'Галерея',
       teamTitle: 'Команда',
       scheduleTitle: 'Расписание',
-      ctaText: `Готовы начать с ${siteName}?`,
+      ctaText: `Готовы начать с ${sn}?`,
       ctaBtn: 'Связаться',
       features,
       services,
       portfolio: [
-        { title: `${siteName} — проект 1`, desc: 'Разработка под ключ' },
-        { title: `${siteName} — проект 2`, desc: 'Дизайн и вёрстка' },
-        { title: `${siteName} — проект 3`, desc: 'Оптимизация и поддержка' },
+        { title: `${sn} — проект 1`, desc: 'Разработка под ключ' },
+        { title: `${sn} — проект 2`, desc: 'Дизайн и вёрстка' },
+        { title: `${sn} — проект 3`, desc: 'Оптимизация' },
       ],
       pricing: [
         { name: 'Базовый', price: '9 900', desc: 'Для старта' },
@@ -133,14 +157,14 @@ const AI = {
         { name: 'Премиум', price: '49 900', desc: 'Максимум' },
       ],
       reviews: [
-        { name: 'Алексей', text: 'Отличная работа! Сделали быстро и качественно.' },
-        { name: 'Мария', text: 'Очень довольна результатом. Рекомендую!' },
-        { name: 'Дмитрий', text: 'Профессиональный подход и внимание к деталям.' },
+        { name: 'Алексей', text: 'Отличная работа! Сделали быстро.' },
+        { name: 'Мария', text: 'Очень довольна результатом.' },
+        { name: 'Дмитрий', text: 'Профессиональный подход.' },
       ],
       faq: [
-        { q: 'Сколько времени занимает разработка?', a: 'AI генерирует сайт за 40 минут, публикация — 2 минуты.' },
-        { q: 'Нужен ли хостинг?', a: 'GitHub Pages — бесплатный хостинг.' },
-        { q: 'Могу ли я править код?', a: 'Да, вы получаете полный исходный код.' },
+        { q: 'Сколько времени занимает разработка?', a: 'AI генерирует сайт за 40 минут.' },
+        { q: 'Нужен ли хостинг?', a: 'GitHub Pages — бесплатно.' },
+        { q: 'Могу ли я править код?', a: 'Да, полный исходный код ваш.' },
       ],
       team: [
         { name: 'Илья', role: 'Разработчик' },
@@ -154,7 +178,7 @@ const AI = {
       ],
     };
 
-    setStatus({ text: '✅ ИИ закончил! Страница готова', progress: 100 });
+    setStatus({ text: '✅ ИИ сгенерировал контент!', progress: 100 });
     return content;
   },
 };
