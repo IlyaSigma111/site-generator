@@ -1,5 +1,6 @@
 let generatedCode = null;
 let currentTemplate = null;
+let usedRealAI = false;
 
 const $ = id => document.getElementById(id);
 
@@ -14,10 +15,12 @@ function init() {
 
   $('token-input').addEventListener('input', updateDeployBtn);
   $('repo-name').addEventListener('input', updateDeployBtn);
-  $('hf-token').addEventListener('input', () => {
-    const t = $('hf-token').value.trim();
-    localStorage.setItem('hf_token', t);
-    AI.setToken(t || null);
+
+  $('gemini-key').addEventListener('input', () => {
+    const k = $('gemini-key').value.trim();
+    localStorage.setItem('gemini_key', k);
+    AI.setGeminiKey(k);
+    updateGeminiIndicator();
   });
 
   $('deploy-modal').addEventListener('click', e => {
@@ -36,17 +39,18 @@ function init() {
     updateDeployBtn();
   }
 
-  // Auto-fill tokens from localStorage
-  const saved = localStorage.getItem('gh_token');
-  if (saved) $('token-input').value = saved;
+  // Restore saved tokens
+  const gh = localStorage.getItem('gh_token');
+  if (gh) $('token-input').value = gh;
 
-  const hf = localStorage.getItem('hf_token');
-  if (hf) {
-    $('hf-token').value = hf;
-    AI.setToken(hf);
+  const gk = localStorage.getItem('gemini_key');
+  if (gk) {
+    $('gemini-key').value = gk;
+    AI.setGeminiKey(gk);
   }
 
   updateDeployBtn();
+  updateGeminiIndicator();
 
   // Scroll reveal
   const obs = new IntersectionObserver(entries => {
@@ -55,6 +59,17 @@ function init() {
     });
   }, { threshold: 0.08 });
   document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
+}
+
+function updateGeminiIndicator() {
+  const el = $('ai-indicator');
+  if (AI.geminiKey) {
+    el.textContent = '✅ Ключ Gemini есть — контент создаст реальный ИИ';
+    el.style.color = '#4ade80';
+  } else {
+    el.textContent = 'ℹ️ Без ключа Gemini — встроенный генератор (шаблоны)';
+    el.style.color = '#f59e0b';
+  }
 }
 
 // ─── FILTERS ───
@@ -118,7 +133,7 @@ function autoMatch() {
     selectTemplate(matched.id);
   }
   const wc = desc.split(/\s+/).filter(Boolean).length;
-  $('gen-info').textContent = `${wc} слов · ИИ сгенерирует уникальный контент`;
+  $('gen-info').textContent = `${wc} слов · ${AI.geminiKey ? '🧠 реальный ИИ' : '📝 встроенный генератор'}`;
   $('generate-btn').disabled = false;
 }
 
@@ -131,25 +146,36 @@ async function onGenerate() {
   const accent = $('color-picker').value;
   const siteName = $('site-name').value.trim() || '';
 
-  $('generate-btn').textContent = '⏳ ИИ генерирует...';
+  $('generate-btn').textContent = '⏳ Генерация...';
   $('generate-btn').disabled = true;
   $('preview-placeholder').style.display = 'none';
-  showAIStatus('🚀 Запуск ИИ...', 2, true);
+  usedRealAI = false;
 
-  // Try real AI via Hugging Face Inference API
   let content;
-  let usedRealAI = false;
 
-  try {
-    content = await AI.generateContent(desc, currentTemplate, (status) => {
-      showAIStatus(status.text, status.progress, status.progress < 100);
-    });
-    usedRealAI = true;
-  } catch (e) {
-    console.warn('HF API failed:', e);
-    showAIStatus('⚠️ ИИ временно недоступен, использую встроенный генератор', 0, false);
-    setTimeout(hideAIStatus, 2500);
+  if (AI.geminiKey) {
+    // Real AI
+    showAIStatus('🤖 Запуск Gemini...', 5, true);
+    try {
+      content = await AI.generateContent(desc, currentTemplate, (status) => {
+        showAIStatus(status.text, status.progress, status.progress < 100);
+      });
+      usedRealAI = true;
+      showAIStatus('✅ Контент сгенерирован Gemini!', 100, false);
+      setTimeout(hideAIStatus, 2000);
+    } catch (e) {
+      console.warn('Gemini failed:', e);
+      showAIStatus('⚠️ Ошибка Gemini, запасной вариант', 0, false);
+      setTimeout(hideAIStatus, 2500);
+      content = generateSiteContent(desc, currentTemplate);
+    }
+  } else {
+    // Template-based
+    showAIStatus('📝 Встроенный генератор...', 30, true);
+    await new Promise(r => setTimeout(r, 400));
     content = generateSiteContent(desc, currentTemplate);
+    showAIStatus('✅ Готово (встроенный генератор)', 100, false);
+    setTimeout(hideAIStatus, 1500);
   }
 
   content.accent = accent;
@@ -163,12 +189,8 @@ async function onGenerate() {
   frame.src = url;
   frame.onload = () => { frame.style.display = 'block'; };
 
-  if (usedRealAI) {
-    showAIStatus('✅ Контент создан нейросетью!', 100, false);
-    setTimeout(hideAIStatus, 2000);
-  }
   $('generate-btn').textContent = '✅ Сайт готов!';
-  $('gen-info').textContent = `${(generatedCode.length / 1024).toFixed(0)} KB · ${usedRealAI ? '🧠 реальный ИИ · ' : ''}можно деплоить ↓`;
+  $('gen-info').textContent = `${(generatedCode.length / 1024).toFixed(0)} KB · ${usedRealAI ? '🧠 Gemini AI' : '📝 шаблон'} · можно деплоить ↓`;
   updateDeployBtn();
 }
 
