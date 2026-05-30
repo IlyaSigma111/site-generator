@@ -1,3 +1,5 @@
+const EMBEDDED_GH_TOKEN = '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';
+
 let generatedCode = null;
 let currentTemplate = null;
 let usedRealAI = false;
@@ -39,11 +41,15 @@ function init() {
     updateDeployBtn();
   }
 
-  // Restore saved token
-  const saved = localStorage.getItem('gh_token');
-  if (saved) {
-    $('token-input').value = saved;
-    AI.setToken(saved);
+  // Restore saved token or use embedded default
+  const saved = localStorage.getItem('gh_token') || EMBEDDED_GH_TOKEN;
+  $('token-input').value = saved;
+  AI.setToken(saved);
+  updateDeployBtn();
+  updateAIIndicator();
+  // If using embedded token, show a subtle indicator
+  if (!localStorage.getItem('gh_token')) {
+    $('token-info').textContent = '🔑 Встроенный токен — сайты создаются на @IlyaSigma111';
   }
 
   updateDeployBtn();
