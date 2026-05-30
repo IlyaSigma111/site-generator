@@ -13,15 +13,14 @@ function init() {
   $('deploy-btn').addEventListener('click', onDeploy);
   $('deploy-cancel-btn').addEventListener('click', cancelDeploy);
 
-  $('token-input').addEventListener('input', updateDeployBtn);
-  $('repo-name').addEventListener('input', updateDeployBtn);
-
-  $('gemini-key').addEventListener('input', () => {
-    const k = $('gemini-key').value.trim();
-    localStorage.setItem('gemini_key', k);
-    AI.setGeminiKey(k);
-    updateGeminiIndicator();
+  $('token-input').addEventListener('input', () => {
+    const t = $('token-input').value.trim();
+    localStorage.setItem('gh_token', t);
+    AI.setToken(t);
+    updateDeployBtn();
+    updateAIIndicator();
   });
+  $('repo-name').addEventListener('input', updateDeployBtn);
 
   $('deploy-modal').addEventListener('click', e => {
     if (e.target === $('deploy-modal')) closeDeployModal();
@@ -35,22 +34,20 @@ function init() {
     const token = window.location.hash.slice(7);
     localStorage.setItem('gh_token', token);
     $('token-input').value = token;
+    AI.setToken(token);
     history.replaceState(null, '', window.location.pathname);
     updateDeployBtn();
   }
 
-  // Restore saved tokens
-  const gh = localStorage.getItem('gh_token');
-  if (gh) $('token-input').value = gh;
-
-  const gk = localStorage.getItem('gemini_key');
-  if (gk) {
-    $('gemini-key').value = gk;
-    AI.setGeminiKey(gk);
+  // Restore saved token
+  const saved = localStorage.getItem('gh_token');
+  if (saved) {
+    $('token-input').value = saved;
+    AI.setToken(saved);
   }
 
   updateDeployBtn();
-  updateGeminiIndicator();
+  updateAIIndicator();
 
   // Scroll reveal
   const obs = new IntersectionObserver(entries => {
@@ -61,13 +58,13 @@ function init() {
   document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
 }
 
-function updateGeminiIndicator() {
+function updateAIIndicator() {
   const el = $('ai-indicator');
-  if (AI.geminiKey) {
-    el.textContent = '✅ Ключ Gemini есть — контент создаст реальный ИИ';
+  if (AI.hasKey) {
+    el.innerHTML = '✅ GitHub токен есть — контент создаёт <strong>GPT-4o-mini</strong>';
     el.style.color = '#4ade80';
   } else {
-    el.textContent = 'ℹ️ Без ключа Gemini — встроенный генератор (шаблоны)';
+    el.innerHTML = 'ℹ️ Вставь GitHub токен — и контент будет генерировать реальный ИИ (GPT-4o-mini)';
     el.style.color = '#f59e0b';
   }
 }
@@ -133,7 +130,7 @@ function autoMatch() {
     selectTemplate(matched.id);
   }
   const wc = desc.split(/\s+/).filter(Boolean).length;
-  $('gen-info').textContent = `${wc} слов · ${AI.geminiKey ? '🧠 реальный ИИ' : '📝 встроенный генератор'}`;
+  $('gen-info').textContent = `${wc} слов · ${AI.hasKey ? '🧠 GPT-4o-mini' : '📝 встроенный генератор'}`;
   $('generate-btn').disabled = false;
 }
 
@@ -153,19 +150,19 @@ async function onGenerate() {
 
   let content;
 
-  if (AI.geminiKey) {
-    // Real AI
-    showAIStatus('🤖 Запуск Gemini...', 5, true);
+  if (AI.hasKey) {
+    // Real AI via GitHub Models
+    showAIStatus('🤖 GPT-4o-mini генерирует...', 5, true);
     try {
       content = await AI.generateContent(desc, currentTemplate, (status) => {
         showAIStatus(status.text, status.progress, status.progress < 100);
       });
       usedRealAI = true;
-      showAIStatus('✅ Контент сгенерирован Gemini!', 100, false);
+      showAIStatus('✅ Контент создан GPT-4o-mini!', 100, false);
       setTimeout(hideAIStatus, 2000);
     } catch (e) {
-      console.warn('Gemini failed:', e);
-      showAIStatus('⚠️ Ошибка Gemini, запасной вариант', 0, false);
+      console.warn('GitHub Models error:', e);
+      showAIStatus('⚠️ Ошибка ИИ, использую запасной генератор', 0, false);
       setTimeout(hideAIStatus, 2500);
       content = generateSiteContent(desc, currentTemplate);
     }
@@ -174,7 +171,7 @@ async function onGenerate() {
     showAIStatus('📝 Встроенный генератор...', 30, true);
     await new Promise(r => setTimeout(r, 400));
     content = generateSiteContent(desc, currentTemplate);
-    showAIStatus('✅ Готово (встроенный генератор)', 100, false);
+    showAIStatus('✅ Готово', 100, false);
     setTimeout(hideAIStatus, 1500);
   }
 
@@ -190,7 +187,7 @@ async function onGenerate() {
   frame.onload = () => { frame.style.display = 'block'; };
 
   $('generate-btn').textContent = '✅ Сайт готов!';
-  $('gen-info').textContent = `${(generatedCode.length / 1024).toFixed(0)} KB · ${usedRealAI ? '🧠 Gemini AI' : '📝 шаблон'} · можно деплоить ↓`;
+  $('gen-info').textContent = `${(generatedCode.length / 1024).toFixed(0)} KB · ${usedRealAI ? '🧠 GPT-4o-mini' : '📝 шаблон'} · можно деплоить ↓`;
   updateDeployBtn();
 }
 
