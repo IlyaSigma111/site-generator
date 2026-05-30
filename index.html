@@ -135,6 +135,19 @@ nav .nav-links a:hover{color:#f1f5f9;}
 .deploy-result a{color:#ffd700;font-weight:600;word-break:break-all;}
 .modal-btns{display:flex;gap:10px;margin-top:16px;}
 
+/* AI STATUS */
+.ai-status{display:none;align-items:center;gap:14px;padding:14px 20px;background:rgba(255,215,0,.03);border:1px solid rgba(255,215,0,.06);border-radius:12px;margin-top:14px;font-size:14px;color:#94a3b8;}
+.ai-status .ai-spinner{width:20px;height:20px;border:2px solid rgba(255,215,0,.1);border-top-color:#ffd700;border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ai-status .ai-label{flex:1;line-height:1.4;}
+.ai-status .ai-pct{font-weight:700;color:#ffd700;white-space:nowrap;font-size:13px;}
+.ai-progress{height:3px;background:rgba(255,255,255,.03);border-radius:3px;overflow:hidden;margin-top:12px;display:none;}
+.ai-progress-fill{height:100%;width:0%;background:linear-gradient(90deg,#ffd700,#f59e0b);border-radius:3px;transition:width .3s;}
+
+/* LOADING SHIMMER */
+@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+.ai-loading .btn-p{background:linear-gradient(90deg,#ffd700,#f59e0b,#ffd700);background-size:200% 100%;animation:shimmer 1.5s infinite;color:transparent;-webkit-background-clip:text;background-clip:text;}
+
 /* REVEAL */
 .reveal{opacity:0;transform:translateY(24px);transition:all .6s cubic-bezier(.23,1,.32,1);}
 .reveal.visible{opacity:1;transform:translateY(0);}
@@ -217,6 +230,16 @@ nav .nav-links a:hover{color:#f1f5f9;}
       <button class="btn btn-p" id="generate-btn" disabled>⚡ Создать за 40 мин</button>
     </div>
 
+    <!-- AI STATUS -->
+    <div class="ai-status" id="ai-status">
+      <div class="ai-spinner"></div>
+      <div class="ai-label" id="ai-label">ИИ загружается...</div>
+      <div class="ai-pct" id="ai-pct">0%</div>
+    </div>
+    <div class="ai-progress" id="ai-progress">
+      <div class="ai-progress-fill" id="ai-progress-fill"></div>
+    </div>
+
     <!-- PREVIEW -->
     <div class="preview-wrap reveal">
       <div class="preview-frame-wrap">
@@ -282,8 +305,10 @@ nav .nav-links a:hover{color:#f1f5f9;}
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.6.0"></script>
 <script src="js/templates.js"></script>
 <script src="js/github.js"></script>
+<script src="js/ai.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

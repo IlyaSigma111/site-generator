@@ -35,193 +35,219 @@ const TEMPLATES = [
 const COMPLEX_LABELS = {easy:"Простой",medium:"Средний",hard:"Сложный"};
 const COMPLEX_COLORS = {easy:"#4ade80",medium:"#fbbf24",hard:"#fb7185"};
 
-// ===== AI Content Generator =====
-// Generates all text content based on user's description
+// ===== AI Content Generator v2 =====
+// Uses the user's own words to generate personalized content
 function generateSiteContent(description, template) {
   const d = description.toLowerCase();
-  const words = d.split(/[\s,.]/).filter(w => w.length > 2);
+  const words = d.split(/[\s,.!?]+/).filter(w => w.length > 2);
+  const sentences = description.split(/[.!?]+/).filter(s => s.trim().length > 5);
 
-  // Extract key themes
+  // Extract key name from description (quoted words, capitalized phrases)
+  const keyName = (description.match(/["""'']([^""''"]+)["""'']/) || [])[1] ||
+                  (description.match(/назван[ие]\s+(\S+)/i) || [])[1] ||
+                  words.filter(w => /^[A-ZА-Я]/.test(w) && w.length > 1)[0] ||
+                  template.name;
+
+  // Extract key nouns — words with length > 3 that aren't stopwords
+  const stopwords = ['сайт','нужен','хочу','сделай','можно','чтобы','этот','будет','есть','для','какой','который','также','все','или'];
+  const keyWords = words.filter(w => w.length > 3 && !stopwords.includes(w));
+
+  // Themes
   const themes = {
-    isBusiness: /компани|бизнес|фирм|предприяти|организаци/.test(d),
-    isPersonal: /личн|себ|портфолио|фотограф|дизайнер|разработчик|фриланс/.test(d),
-    isProduct: /продукт|товар|услуг|сервис/.test(d),
-    isTech: /технолог|it|софт|програм|сайт|апп|приложени/.test(d),
-    isCreative: /креатив|дизайн|арт|фото|творче/.test(d),
-    isHealth: /фитнес|тренер|спорт|салон|красот|клиник|врач/.test(d),
-    isFood: /ресторан|кафе|меню|еда|кухн/.test(d),
-    isRealEstate: /недвижим|квартир|дом/.test(d),
-    isEducation: /курс|коучинг|обучени|школ/.test(d),
-    isEvent: /мероприят|конференц|event|вебинар/.test(d),
+    isBusiness: /компани|бизнес|фирм|предприяти|организаци|корпоратив/.test(d),
+    isPersonal: /личн|себ|портфолио|фотограф|дизайнер|разработчик|фриланс/i.test(description),
+    isTech: /технолог|it|софт|програм|апп|приложени|стартап/i.test(description),
+    isCreative: /креатив|дизайн|арт|фото|творче/i.test(description),
+    isHealth: /фитнес|тренер|спорт|тренажер|салон|красот|клиник|врач|медицин|здоров/i.test(description),
+    isFood: /ресторан|кафе|меню|еда|кухн|бар|достав/i.test(description),
+    isRealEstate: /недвижим|квартир|дом|жиль/i.test(description),
+    isEducation: /курс|коучинг|обучени|школ|тренинг|образован/i.test(description),
+    isEvent: /мероприят|конференц|event|вебинар|фестивал/i.test(description),
+    isStore: /магазин|продаж|товар|корзин|каталог/i.test(description),
   };
 
-  const siteName = extractSiteName(description, template.name);
-  const tagline = generateTagline(description, themes);
-  const aboutText = generateAbout(description, template, themes);
-  const features = generateFeatures(description, themes);
-  const services = generateServices(description, themes);
-  const portfolio = generatePortfolio(description, themes);
-  const pricing = generatePricing(description, themes);
-  const reviews = generateReviews(description);
-  const faq = generateFAQ(description, themes);
-  const team = generateTeam(description, themes);
-  const stats = generateStats(description, themes);
+  // Build context: use user's actual words
+  const ctx = keyWords.slice(0, 6);
+  const kw1 = ctx[0] || '';
+  const kw2 = ctx[1] || '';
+  const kw3 = ctx[2] || '';
+
+  const siteName = extractSiteName(description, keyName);
+
+  const tagline = generateTagline(description, themes, ctx);
+  const aboutText = generateAbout(description, template, themes, ctx);
+  const features = generateFeatures(description, themes, ctx);
+  const services = generateServices(description, themes, ctx);
+  const portfolio = generatePortfolio(ctx);
+  const pricing = generatePricing(themes);
+  const reviews = generateReviews();
+  const faq = generateFAQ(themes);
+  const team = generateTeam();
+  const stats = generateStats();
 
   return {
-    siteName, tagline, aboutText, aboutTitle: 'О нас',
-    featuresTitle: 'Наши преимущества',
-    servicesTitle: 'Что мы предлагаем',
-    portfolioTitle: 'Наши проекты',
-    pricingTitle: 'Тарифы',
-    reviewsTitle: 'Отзывы клиентов',
+    siteName, tagline, aboutText,
+    aboutTitle: pick(['О нас','О компании','О проекте'], themes.isBusiness ? 1 : themes.isPersonal ? 1 : 0),
+    featuresTitle: pick(['Почему мы','Наши преимущества','Возможности','Ключевые особенности'], 0),
+    servicesTitle: pick(['Услуги','Что мы предлагаем','Наши сервисы','Что я делаю'], themes.isCreative ? 3 : 0),
+    portfolioTitle: pick(['Наши работы','Портфолио','Проекты','Примеры'], 0),
+    pricingTitle: pick(['Стоимость','Тарифы','Цены','Прайс-лист'], 0),
+    reviewsTitle: 'Отзывы',
     faqTitle: 'Часто задаваемые вопросы',
-    contactTitle: 'Связаться с нами',
+    contactTitle: 'Связаться',
     galleryTitle: 'Галерея',
     teamTitle: 'Наша команда',
     scheduleTitle: 'Расписание',
-    ctaText: 'Готовы начать?',
+    ctaText: `Готовы начать с ${keyName}?`,
     ctaBtn: 'Связаться',
     features, services, portfolio, pricing, reviews, faq, team, stats,
-    aboutTitle: themes.isBusiness ? 'О компании' : themes.isPersonal ? 'О себе' : 'О нас',
-    featuresTitle: themes.isTech ? 'Возможности' : themes.isProduct ? 'Преимущества' : 'Почему мы',
-    servicesTitle: themes.isBusiness ? 'Наши услуги' : themes.isCreative ? 'Что я делаю' : 'Услуги',
-    portfolioTitle: themes.isCreative ? 'Мои работы' : 'Наши проекты',
-    pricingTitle: themes.isBusiness ? 'Тарифы' : 'Стоимость',
   };
 }
 
+function pick(arr, idx) { return arr[idx % arr.length]; }
+function randomInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+function capitalizeFirst(str) { return str.charAt(0).toUpperCase() + str.slice(1); }
+
 function extractSiteName(desc, fallback) {
-  // Try to extract a name from "называется ...", "имя ...", "сайт для ..."
   const match = desc.match(/называется\s+[""']?([^""'.!?]+)/i) ||
                 desc.match(/сайт\s+(?:для\s+)?[""']?([^""'.!?]+)/i) ||
-                desc.match(/проект\s+[""']?([^""'.!?]+)/i);
-  if (match) return match[1].trim().split(/\s/).slice(0,3).join(' ');
+                desc.match(/проект\s+[""']?([^""'.!?]+)/i) ||
+                desc.match(/[""']([А-Яа-яA-Za-z]{2,}(?:\s[А-Яа-яA-Za-z]{2,}){0,2})[""']/);
+  if (match) return match[1].trim();
+  const words = desc.trim().split(/\s+/);
+  const capitalized = words.filter(w => /^[A-ZА-Я]/.test(w) && w.length > 1);
+  if (capitalized.length > 0) return capitalized.slice(0, 2).join(' ');
   return fallback;
 }
 
-function capitalizeFirst(str) {
-  return str.charAt(0).toUpperCase() + str.slice(1);
-}
-
-function generateTagline(desc, themes) {
-  const templates = [
-    `Современные цифровые решения для вашего бизнеса`,
-    `Креативный подход и профессиональное исполнение`,
-    `Разработка, которая приносит результат`,
-    `Качественно. Быстро. Надёжно.`,
-    `Ваш успех — наша работа`,
-    `Сделано с душой и вниманием к деталям`,
-  ];
+function generateTagline(desc, themes, ctx) {
+  const [a, b, c] = [...ctx, '', '', ''];
   if (themes.isTech) return `Технологии, которые работают на вас`;
   if (themes.isCreative) return `Креатив, вдохновение, результат`;
-  if (themes.isHealth) return `Забота о вас — наша миссия`;
+  if (themes.isHealth) return `Забота о вашем здоровье — наша миссия`;
   if (themes.isFood) return `Вкусно, как дома`;
-
-  const words = desc.split(/\s+/);
-  // Build a tagline from description keywords
-  const keyWords = words.filter(w => w.length > 3).slice(0,3);
-  if (keyWords.length >= 2) {
-    return capitalizeFirst(`${keyWords[0]} • ${keyWords[1]} • качество`);
-  }
-  return templates[Math.floor(Math.random() * templates.length)];
+  if (themes.isEvent) return `Событие, которое запомнится`;
+  if (themes.isStore) return `Всё для ${a || 'вас'} в одном месте`;
+  if (a && b) return `${capitalizeFirst(a)} • ${capitalizeFirst(b)} • качество`;
+  if (a) return `${capitalizeFirst(a)} — профессиональный подход`;
+  return pick([
+    'Современные решения для ваших задач',
+    'Качественно. Быстро. Надёжно.',
+    'Ваш успех — наша работа',
+    'Сделано с душой и вниманием к деталям',
+    'Профессиональный подход к каждому проекту',
+  ]);
 }
 
-function generateAbout(desc, template, themes) {
-  const base = [
-    `Мы создаём современные цифровые продукты, которые помогают бизнесу расти и развиваться. Наш подход — сочетание креативного дизайна, продуманного UX и чистого кода.`,
-    `Наша команда специализируется на создании сайтов и веб-сервисов под ключ. Мы верим, что хороший сайт — это инструмент, который приносит реальную пользу бизнесу.`,
-  ];
+function generateAbout(desc, template, themes, ctx) {
+  const [a, b, c] = [...ctx, '', '', ''];
+  const name = a || 'наши клиенты';
 
-  let about = base[0];
   if (themes.isPersonal) {
-    about = `Я занимаюсь созданием современных цифровых продуктов. Мой подход — внимание к деталям, чистый код и продуманный дизайн. Каждый проект — это решение конкретной задачи.`;
-  } else if (themes.isTech) {
-    about = `Мы разрабатываем технологичные решения для бизнеса. Используем современный стек технологий, следим за трендами и внедряем лучшие практики.`;
-  } else if (themes.isCreative) {
-    about = `Мы создаём креативные проекты, которые выделяются на фоне конкурентов. Дизайн, эстетика, внимание к каждой детали — вот что нас отличает.`;
+    return `Я занимаюсь созданием современных цифровых продуктов. Мой подход — внимание к деталям, чистый код и продуманный дизайн. Каждый проект — это решение конкретной задачи, будь то ${b || 'сайт для бизнеса'} или ${c || 'личный проект'}. Я использую современные технологии и лучшие практики, чтобы результат превзошёл ожидания.`;
   }
-
-  const descWords = desc.split(/[.!?]/).filter(s => s.trim().length > 10);
-  if (descWords.length > 0) {
-    about += `\n\n${descWords[0].trim()}.`;
-  }
-
-  return about;
-}
-
-function generateFeatures(desc, themes) {
-  const defaults = [
-    {title:"Современный дизайн",desc:"Актуальные тренды и стильная анимация"},
-    {title:"Быстрая загрузка",desc:"Оптимизированный код без лишнего"},
-    {title:"Адаптивность",desc:"Идеально на телефонах, планшетах и ПК"},
-    {title:"SEO-дружелюбность",desc:"Правильная структура для поисковиков"},
-  ];
   if (themes.isTech) {
-    return [
-      {title:"Современный стек",desc:"React, Next.js, TypeScript, Node.js"},
-      {title:"Масштабируемость",desc:"Архитектура, готовая к росту"},
-      {title:"Производительность",desc:"Lighthouse 95+ из коробки"},
-      {title:"API-first подход",desc:"Готовая интеграция с любыми сервисами"},
-    ];
-  }
-  if (themes.isCreative) {
-    return [
-      {title:"Уникальный дизайн",desc:"Каждый проект — индивидуальный"},
-      {title:"Внимание к деталям",desc:"Пиксель-перфект вёрстка"},
-      {title:"Креативные решения",desc:"Нестандартный подход к задачам"},
-      {title:"Сроки",desc:"Сдаём проекты вовремя"},
-    ];
+    return `Мы разрабатываем технологичные решения для ${name}. Наш стек — современные фреймворки, оптимизированный код и продуманная архитектура. Мы следим за трендами и внедряем лучшие практики, чтобы каждый продукт был на шаг впереди. ${b ? `Особое внимание уделяем ${b}.` : ''}`;
   }
   if (themes.isHealth) {
-    return [
-      {title:"Профессионализм",desc:"Опытные специалисты своего дела"},
-      {title:"Индивидуальный подход",desc:"Учитываем особенности каждого клиента"},
-      {title:"Современное оборудование",desc:"Новейшие технологии и методики"},
-      {title:"Комфорт",desc:"Уютная атмосфера и внимательное отношение"},
-    ];
+    return `Наша команда профессионалов заботится о вашем здоровье. Мы используем современное оборудование и проверенные методики. Индивидуальный подход к каждому клиенту — наш приоритет. ${b ? `Мы специализируемся на ${b}.` : ''}`;
   }
-  return defaults;
-}
-
-function generateServices(desc, themes) {
-  const defaults = [
-    {title:"Разработка сайтов",desc:"Создаём сайты с нуля под ключ"},
-    {title:"Веб-дизайн",desc:"Продуманный интерфейс и UX"},
-    {title:"Поддержка",desc:"Техподдержка и доработки"},
-  ];
+  if (themes.isCreative) {
+    return `Мы создаём креативные проекты, которые выделяются. Дизайн, эстетика, внимание к каждой детали — вот что нас отличает. ${a ? `Проект "${capitalizeFirst(a)}" — это отражение наших ценностей и подхода к работе.` : ''}`;
+  }
+  if (themes.isFood) {
+    return `${capitalizeFirst(a || 'Мы')} — это место, где вкус встречается с уютом. Мы используем только свежие продукты, а каждое блюдо готовится с душой. ${b ? `Наше фирменное направление — ${b}.` : ''}`;
+  }
   if (themes.isBusiness) {
-    return [
-      {title:"Корпоративные сайты",desc:"Представительство вашей компании в сети"},
-      {title:"Интернет-магазины",desc:"Полноценная платформа для продаж"},
-      {title:"CRM-интеграция",desc:"Подключение к вашим бизнес-системам"},
-    ];
+    return `Компания "${capitalizeFirst(name)}" — это команда профессионалов, которые знают, как сделать бизнес эффективнее. Мы помогаем компаниям расти, привлекать клиентов и увеличивать прибыль. ${b ? `Наша экспертиза в ${b} позволяет нам предлагать лучшие решения.` : ''}`;
   }
-  if (themes.isCreative) {
-    return [
-      {title:"Веб-дизайн",desc:"Индивидуальный дизайн с нуля"},
-      {title:"Фирменный стиль",desc:"Логотип, айдентика, брендинг"},
-      {title:"UI/UX консалтинг",desc:"Аудит и улучшение интерфейсов"},
-    ];
-  }
-  if (themes.isHealth) {
-    return [
-      {title:"Консультация",desc:"Первичный приём и диагностика"},
-      {title:"Лечение",desc:"Современные методики терапии"},
-      {title:"Профилактика",desc:"Регулярные осмотры и рекомендации"},
-    ];
-  }
-  return defaults;
+  return `${capitalizeFirst(name)} — это профессиональный подход к созданию цифровых продуктов. Мы сочетаем креативный дизайн, продуманный UX и чистый код. Наша цель — сделать интернет удобнее и красивее для каждого пользователя.`;
 }
 
-function generatePortfolio(desc, themes) {
+function generateFeatures(desc, themes, ctx) {
+  const [a, b, c] = [...ctx, '', '', ''];
+  if (themes.isTech) return [
+    {title:"Современный стек",desc:`React, Next.js, TypeScript — технологии, которые обеспечивают ${a || 'производительность и надёжность'}`},
+    {title:"Масштабируемость",desc:`Архитектура, готовая к росту. ${b || 'От 10 до 10 000 пользователей без потери скорости'}`},
+    {title:"Производительность",desc:"Lighthouse 95+ из коробки. Быстрая загрузка на любых устройствах"},
+    {title:"API-first подход",desc:"Готовая интеграция с любыми сервисами и расширяемая функциональность"},
+  ];
+  if (themes.isHealth) return [
+    {title:"Профессионализм",desc:`Опытные специалисты с ${a || 'многолетним стажем'} и регулярным повышением квалификации`},
+    {title:"Индивидуальный подход",desc:`Учитываем особенности ${b || 'каждого клиента'}. Персональные программы и рекомендации`},
+    {title:"Современное оборудование",desc:"Новейшие технологии и проверенные методики для лучших результатов"},
+    {title:"Комфорт и забота",desc:"Уютная атмосфера и внимательное отношение к каждому посетителю"},
+  ];
+  if (themes.isCreative) return [
+    {title:"Уникальный дизайн",desc:`Каждый проект — индивидуальный. Никаких шаблонов, только ${a || 'уникальные решения'}`},
+    {title:"Внимание к деталям",desc:"Пиксель-перфект вёрстка и продуманный UX"},
+    {title:"Креативный подход",desc:"Нестандартные решения для стандартных задач"},
+    {title:"Соблюдение сроков",desc:"Чёткое планирование и своевременная сдача проектов"},
+  ];
+  if (themes.isStore) return [
+    {title:"Удобный каталог",desc:`Интуитивно понятная навигация и ${a || 'умные фильтры для быстрого поиска'}`},
+    {title:"Быстрая оплата",desc:"Поддержка всех популярных платёжных систем"},
+    {title:"Личный кабинет",desc:"История заказов, избранное, отслеживание посылок"},
+    {title:"Поддержка",desc:`Круглосуточная поддержка ${b || 'клиентов'}. Отвечаем за минуту`},
+  ];
   return [
-    {title:"Проект Alpha",desc:"Разработка корпоративного портала"},
-    {title:"Проект Beta",desc:"Интернет-магазин с нуля"},
-    {title:"Проект Gamma",desc:"Лендинг с конверсией 12%"},
+    {title:"Современный дизайн",desc:"Актуальные тренды и стильная анимация. Ваш сайт будет выделяться"},
+    {title:"Быстрая загрузка",desc:"Оптимизированный код и изображения. Мгновенный старт"},
+    {title:"Адаптивность",desc:"Идеально на телефонах, планшетах и ПК. Все устройства поддерживаются"},
+    {title:"SEO-оптимизация",desc:"Правильная структура для поисковиков. Ваш сайт увидят"},
   ];
 }
 
-function generatePricing(desc, themes) {
+function generateServices(desc, themes, ctx) {
+  const [a, b] = [...ctx, '', ''];
+  if (themes.isBusiness) return [
+    {title:"Корпоративные сайты",desc:"Представительство вашей компании в интернете"},
+    {title:"CRM-интеграция",desc:"Подключение к вашему бизнес-софту и системам учёта"},
+    {title:"SEO-продвижение",desc:"Вывод сайта в топ поисковых систем"},
+  ];
+  if (themes.isCreative) return [
+    {title:"Веб-дизайн",desc:"Индивидуальный дизайн с нуля под ваш бренд"},
+    {title:"Фирменный стиль",desc:"Логотип, айдентика, брендбук"},
+    {title:"UI/UX консалтинг",desc:"Аудит интерфейсов и улучшение пользовательского опыта"},
+  ];
+  if (themes.isHealth) return [
+    {title:"Консультация",desc:"Первичный приём и диагностика состояния"},
+    {title:"Лечение",desc:"Современные методики терапии и профилактики"},
+    {title:"Реабилитация",desc:"Восстановление после лечения под наблюдением специалистов"},
+  ];
+  if (themes.isStore) return [
+    {title:"Оформление заказа",desc:"Быстрое и удобное оформление в несколько кликов"},
+    {title:"Доставка",desc:"Доставка по всему городу и региону"},
+    {title:"Гарантия качества",desc:"Возврат и обмен без лишних вопросов"},
+  ];
+  return [
+    {title:pick(["Разработка","Создание сайтов","Проектирование"]),desc:"Создаём сайты с нуля под ключ"},
+    {title:pick(["Дизайн","Веб-дизайн","Прототипирование"]),desc:"Продуманный интерфейс и пользовательский опыт"},
+    {title:pick(["Поддержка","Сопровождение","Развитие"]),desc:"Техподдержка, доработки и развитие проекта"},
+  ];
+}
+
+function generatePortfolio(ctx) {
+  const [a, b, c] = [...ctx, '', '', ''];
+  const variants = [
+    {title:`${a || 'Проект'} Alpha`,desc:pick(['Разработка корпоративного портала','Создание сайта с нуля','Комплексное решение для бизнеса'])},
+    {title:`${b || 'Проект'} Beta`,desc:pick(['Интернет-магазин с интеграцией','Лендинг с высокой конверсией','Платформа для онлайн-продаж'])},
+    {title:`${c || 'Проект'} Gamma`,desc:pick(['Мобильное приложение','Сайт-каталог с фильтрацией','Корпоративный портал'])},
+  ];
+  return variants;
+}
+
+function generatePricing(themes) {
+  if (themes.isHealth) return [
+    {name:"Первичный",price:"1 500",desc:"Консультация и диагностика"},
+    {name:"Стандарт",price:"3 500",desc:"Полный курс лечения"},
+    {name:"Премиум",price:"7 500",desc:"Комплексное обслуживание"},
+  ];
+  if (themes.isStore) return [
+    {name:"Стандарт",price:"Бесплатно",desc:"Самовывоз из магазина"},
+    {name:"Экспресс",price:"500",desc:"Доставка за 2 часа"},
+    {name:"Премиум",price:"1 500",desc:"Доставка в день заказа"},
+  ];
   return [
     {name:"Базовый",price:"9 900",desc:"Для старта и небольших проектов"},
     {name:"Стандарт",price:"24 900",desc:"Для растущего бизнеса"},
@@ -229,23 +255,26 @@ function generatePricing(desc, themes) {
   ];
 }
 
-function generateReviews(desc) {
+function generateReviews() {
   return [
-    {name:"Алексей",text:"Отличная работа! Сделали быстро и качественно."},
-    {name:"Мария",text:"Очень довольна результатом. Рекомендую!"},
-    {name:"Дмитрий",text:"Профессиональный подход и внимание к деталям."},
+    {name:pick(["Алексей","Дмитрий","Сергей"]),text:pick(["Отличная работа! Сделали быстро и качественно.","Профессиональный подход и внимание к деталям.","Результат превзошёл ожидания. Рекомендую!"])},
+    {name:pick(["Мария","Анна","Елена"]),text:pick(["Очень довольна результатом. Всё чётко и в срок.","Красивый дизайн и удобный интерфейс. Спасибо!","Благодарю за отличную работу! Буду обращаться ещё."])},
+    {name:pick(["Иван","Павел","Константин"]),text:pick(["Лучшее соотношение цены и качества. Обращайтесь!","Сделали всё как я хотел, даже лучше.","Профессионалы своего дела. Быстро, качественно, надёжно."])},
   ];
 }
 
-function generateFAQ(desc, themes) {
-  return [
-    {q:"Сколько времени занимает разработка?",a:"В среднем 40 минут на генерацию и до 2 минут на публикацию."},
-    {q:"Какие условия оплаты?",a:"Предоплата 50%, остальное после сдачи проекта."},
-    {q:"Делаете правки?",a:"Да, мы предоставляем бесплатные правки в течение недели."},
+function generateFAQ(themes) {
+  const qs = [
+    {q:"Сколько времени занимает разработка?",a:"В среднем 40 минут на генерацию сайта и до 2 минут на публикацию через GitHub Pages."},
+    {q:"Нужно ли платить за хостинг?",a:"Нет. GitHub Pages предоставляет бесплатный хостинг. Вы платите только за домен, если хотите свой."},
+    {q:"Могу ли я вносить правки после публикации?",a:"Да. Вы получаете полный код сайта и можете редактировать его самостоятельно или заказать доработки."},
   ];
+  if (themes.isStore) qs[1] = {q:"Какие способы оплаты поддерживаются?",a:"Мы подключаем все популярные платёжные системы: карты, электронные кошельки, наложенный платёж."};
+  if (themes.isHealth) qs[1] = {q:"Нужна ли предварительная запись?",a:"Да, мы работаем по предварительной записи. Оставьте заявку на сайте, и мы свяжемся с вами в ближайшее время."};
+  return qs;
 }
 
-function generateTeam(desc, themes) {
+function generateTeam() {
   return [
     {name:"Илья",role:"Разработчик"},
     {name:"Анна",role:"Дизайнер"},
@@ -253,7 +282,7 @@ function generateTeam(desc, themes) {
   ];
 }
 
-function generateStats(desc, themes) {
+function generateStats() {
   return [
     {num:"100+",label:"Проектов"},
     {num:"50+",label:"Клиентов"},

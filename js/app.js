@@ -1,5 +1,6 @@
 let generatedCode = null;
 let currentTemplate = null;
+let modelLoaded = false;
 
 const $ = id => document.getElementById(id);
 
@@ -22,6 +23,25 @@ function init() {
     if (e.key === 'Escape') closeDeployModal();
   });
 
+  // Auto-fill token from URL hash (injected by get-token.ps1)
+  if (window.location.hash.startsWith('#token=')) {
+    const token = window.location.hash.slice(7);
+    localStorage.setItem('gh_token', token);
+    $('token-input').value = token;
+    history.replaceState(null, '', window.location.pathname);
+    updateDeployBtn();
+  }
+
+  // Auto-fill token from localStorage
+  const saved = localStorage.getItem('gh_token');
+  if (saved) {
+    $('token-input').value = saved;
+    updateDeployBtn();
+  }
+
+  // Preload AI model in background
+  setTimeout(preloadAI, 1000);
+
   // Scroll reveal
   const obs = new IntersectionObserver(entries => {
     entries.forEach(e => {
@@ -29,6 +49,52 @@ function init() {
     });
   }, { threshold: 0.08 });
   document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
+}
+
+// ─── PRELOAD AI MODEL ───
+async function preloadAI() {
+  showAIStatus('🧠 Загрузка нейросети (60MB)...', 0, true);
+  try {
+    await AI.load((status) => {
+      if (status.status === 'download') {
+        showAIStatus(status.text, status.progress, true);
+      } else if (status.status === 'ready') {
+        modelLoaded = true;
+        showAIStatus('✅ Нейросеть готова!', 100, false);
+        setTimeout(() => hideAIStatus(), 2000);
+      } else if (status.status === 'error') {
+        showAIStatus('⚠️ Нейросеть не загрузилась: ' + status.text, 0, false);
+        setTimeout(() => hideAIStatus(), 4000);
+      }
+    });
+  } catch (e) {
+    showAIStatus('⚠️ Использую встроенный генератор', 0, false);
+    setTimeout(() => hideAIStatus(), 3000);
+  }
+}
+
+// ─── AI STATUS ───
+function showAIStatus(text, pct, showSpinner) {
+  const el = $('ai-status');
+  const label = $('ai-label');
+  const pctEl = $('ai-pct');
+  const prog = $('ai-progress');
+  const fill = $('ai-progress-fill');
+
+  el.style.display = 'flex';
+  label.textContent = text;
+  if (pct !== undefined) {
+    pctEl.textContent = pct + '%';
+    prog.style.display = 'block';
+    fill.style.width = pct + '%';
+  }
+  if (showSpinner) el.classList.add('ai-loading');
+  else el.classList.remove('ai-loading');
+}
+
+function hideAIStatus() {
+  $('ai-status').style.display = 'none';
+  $('ai-progress').style.display = 'none';
 }
 
 // ─── FILTERS ───
@@ -46,7 +112,6 @@ function renderTemplateGrid(filter) {
   const grid = $('template-grid');
   grid.innerHTML = '';
   const items = filter === 'all' ? TEMPLATES : TEMPLATES.filter(t => t.complex === filter);
-
   items.forEach(t => {
     const card = document.createElement('div');
     card.className = 'tmpl-card reveal';
@@ -58,11 +123,9 @@ function renderTemplateGrid(filter) {
       <div class="tmpl-tags">
         <span class="tmpl-tag" style="background:${COMPLEX_COLORS[t.complex]}12;color:${COMPLEX_COLORS[t.complex]};border-color:${COMPLEX_COLORS[t.complex]}25">${COMPLEX_LABELS[t.complex]}</span>
         <span class="tmpl-tag tmpl-tag-time">⏱ 40 минут</span>
-      </div>
-    `;
+      </div>`;
     grid.appendChild(card);
   });
-
   setTimeout(() => {
     document.querySelectorAll('#template-grid .reveal').forEach(el => el.classList.add('visible'));
   }, 50);
@@ -71,83 +134,81 @@ function renderTemplateGrid(filter) {
 function selectTemplate(id) {
   currentTemplate = TEMPLATES.find(t => t.id === id);
   document.querySelectorAll('.tmpl-card').forEach(c => c.classList.remove('selected'));
-  const cards = document.querySelectorAll('.tmpl-card');
   const idx = TEMPLATES.indexOf(currentTemplate);
+  const cards = document.querySelectorAll('.tmpl-card');
   if (cards[idx]) cards[idx].classList.add('selected');
-
   $('sel-tmpl-name').textContent = currentTemplate.name;
   $('sel-tmpl-name').style.display = 'inline';
   $('no-sel-tmpl').style.display = 'none';
-
   autoMatch();
 }
 
 // ─── AUTO MATCH ───
 function autoMatch() {
   const desc = $('desc-input').value.trim();
-  const sel = $('sel-tmpl-name');
-
   if (!desc) {
-    $('ai-badge').style.display = 'none';
     $('gen-info').textContent = 'Напиши, какой сайт тебе нужен';
     return;
   }
-
   const matched = matchTemplate(desc);
-
   if (currentTemplate) {
-    $('ai-badge').querySelector('span').textContent = `${currentTemplate.name} (AI: лучше всего подходит "${matched.name}")`;
-    $('ai-badge').style.display = 'flex';
+    // Already selected, just show match info
   } else {
-    sel.textContent = matched.name;
-    sel.style.display = 'inline';
-    $('no-sel-tmpl').style.display = 'none';
     currentTemplate = matched;
     selectTemplate(matched.id);
-    $('ai-badge').querySelector('span').textContent = `${matched.name} (подобран автоматически)`;
-    $('ai-badge').style.display = 'flex';
   }
-
-  const wordCount = desc.split(/\s+/).filter(Boolean).length;
-  $('gen-info').textContent = `${wordCount} слов · ИИ подберёт контент под твой запрос`;
+  const wc = desc.split(/\s+/).filter(Boolean).length;
+  $('gen-info').textContent = `${wc} слов · нейросеть сгенерирует контент`;
   $('generate-btn').disabled = false;
 }
 
-// ─── GENERATE ───
-function onGenerate() {
+// ─── GENERATE (with real AI) ───
+async function onGenerate() {
   const desc = $('desc-input').value.trim();
   if (!desc) { shake($('desc-input')); return; }
-  if (!currentTemplate) { $('gen-info').textContent = '❌ Выбери шаблон из списка ниже'; return; }
+  if (!currentTemplate) { $('gen-info').textContent = '❌ Выбери шаблон'; return; }
 
-  $('generate-btn').textContent = '⏳ ИИ генерирует сайт...';
+  const accent = $('color-picker').value;
+  const siteName = $('site-name').value.trim() || '';
+
+  $('generate-btn').textContent = '⏳ ИИ работает...';
   $('generate-btn').disabled = true;
   $('preview-placeholder').style.display = 'none';
 
-  const accent = $('color-picker').value;
+  // Try AI, fall back to built-in
+  let content;
 
-  setTimeout(() => {
+  if (modelLoaded) {
     try {
-      const content = generateSiteContent(desc, currentTemplate);
-      content.accent = accent;
-      content.siteName = $('site-name').value.trim() || content.siteName;
-
-      generatedCode = generateSite(currentTemplate, content);
-
-      const blob = new Blob([generatedCode], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
-      const frame = $('preview-frame');
-      frame.src = url;
-      frame.onload = () => { frame.style.display = 'block'; };
-
-      $('generate-btn').textContent = '✅ Сайт готов!';
-      $('gen-info').textContent = `${(generatedCode.length / 1024).toFixed(0)} KB · можно деплоить ↓`;
-      updateDeployBtn();
+      showAIStatus('🤖 Нейросеть генерирует контент...', 5, true);
+      content = await AI.generateContent(desc, currentTemplate, (status) => {
+        showAIStatus(status.text, status.progress, status.progress < 100);
+      });
+      showAIStatus('✅ Контент готов!', 100, false);
+      setTimeout(hideAIStatus, 1500);
     } catch (e) {
-      $('gen-info').textContent = '❌ Ошибка: ' + e.message;
-      $('generate-btn').textContent = '⚡ Сгенерировать';
-      $('generate-btn').disabled = false;
+      showAIStatus('⚠️ Ошибка AI, использую запасной генератор', 0, false);
+      setTimeout(hideAIStatus, 2000);
+      content = generateSiteContent(desc, currentTemplate);
     }
-  }, 300);
+  } else {
+    content = generateSiteContent(desc, currentTemplate);
+  }
+
+  content.accent = accent;
+  if (siteName) content.siteName = siteName;
+
+  generatedCode = generateSite(currentTemplate, content);
+
+  const blob = new Blob([generatedCode], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const frame = $('preview-frame');
+  frame.src = url;
+  frame.onload = () => { frame.style.display = 'block'; };
+
+  $('generate-btn').textContent = '✅ Сайт готов!';
+  $('gen-info').textContent = `${(generatedCode.length / 1024).toFixed(0)} KB · можно деплоить ↓`;
+  updateDeployBtn();
 }
 
 function shake(el) {
@@ -176,6 +237,9 @@ async function onDeploy() {
   const token = $('token-input').value.trim();
   const repoName = $('repo-name').value.trim() || 'my-site-' + Date.now().toString(36);
 
+  // Save token to localStorage
+  localStorage.setItem('gh_token', token);
+
   if (!token) { shake($('token-input')); return; }
 
   $('deploy-modal').classList.add('open');
@@ -201,12 +265,10 @@ async function onDeploy() {
       if (deployAborted) throw new Error('aborted');
       status.textContent += msg + '\n';
       status.scrollTop = status.scrollHeight;
-
       for (const [key, pct] of Object.entries(steps)) {
         if (msg.includes(key)) $('deploy-progress').style.width = pct + '%';
       }
     });
-
     $('deploy-progress').style.width = '100%';
     $('deploy-cancel-btn').style.display = 'none';
     $('deploy-result').style.display = 'block';
@@ -225,7 +287,7 @@ function closeDeployModal() {
   $('deploy-modal').classList.remove('open');
 }
 
-// ─── CSS animation ───
+// ─── Shake animation ───
 const style = document.createElement('style');
 style.textContent = `@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}`;
 document.head.appendChild(style);
